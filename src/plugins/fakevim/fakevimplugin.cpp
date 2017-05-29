@@ -1047,6 +1047,11 @@ private:
     void triggerCompletions(FakeVimHandler *handler);
     void triggerSimpleCompletions(FakeVimHandler *handler, const QString &needle, bool forward);
     void windowCommand(FakeVimHandler *handler, const QString &key, int count);
+	void windowSelectLeft(bool);
+	void windowSelectRight(bool);
+	void windowSelectUp(bool);
+	void windowSelectDown(bool);
+	void windowSplitSmart(bool);
     void find(bool reverse);
     void findNext(bool reverse);
     void foldToggle(FakeVimHandler *handler, int depth);
@@ -1099,7 +1104,7 @@ private:
     void setActionChecked(Id id, bool check);
 
     typedef int (*DistFunction)(const QRect &cursor, const QRect &other);
-    void moveSomewhere(FakeVimHandler *handler, DistFunction f, int count);
+    void moveSomewhere(QWidget *handler_widget, DistFunction f, int count);
 
     void keepOnlyWindow(); // :only
 
@@ -1225,6 +1230,36 @@ bool FakeVimPluginPrivate::initialize()
     cmd = ActionManager::registerAction(theFakeVimSetting(ConfigUseFakeVim),
         INSTALL_HANDLER, globalcontext, true);
     cmd->setDefaultKeySequence(QKeySequence(UseMacShortcuts ? Tr::tr("Meta+Shift+V,Meta+Shift+V") : Tr::tr("Alt+V,Alt+V")));
+
+	// expose vim-like directional window select /emacs 'windmove' style hotkeys outside of fakevim mode
+	int i;
+	struct {const char* name1;const char* name2; const char *key;void (FakeVimPluginPrivate::*func)(bool);}
+	s_commands[]={
+		{	"Select","Up","K",&FakeVimPluginPrivate::windowSelectUp
+		},
+		{	"Select","Down","J",&FakeVimPluginPrivate::windowSelectDown
+		},
+		{	"Select","Left","H",&FakeVimPluginPrivate::windowSelectLeft
+		},
+		{	"Select","Right","L",&FakeVimPluginPrivate::windowSelectRight
+		},
+		{	"Split","Smart","D",&FakeVimPluginPrivate::windowSplitSmart
+		}
+	};
+	for (i=0;i<5; i++) {
+		auto desc=&s_commands[i];
+		char actstr[256]; snprintf(actstr,255,"Window %s %s",desc->name1, desc->name2);
+		char idstr[256]; snprintf(idstr,255,"FakeVim.window%s%s",desc->name1,desc->name2);
+		char keystr[256]; snprintf(keystr,255,"Ctrl+E,%s",desc->key);
+
+		auto myAction=new QAction(tr(actstr),this);
+		cmd=ActionManager::registerAction(myAction,idstr,globalcontext);
+		cmd->setDefaultKeySequence(QKeySequence(Tr::tr(keystr)));
+		connect(myAction, &QAction::triggered,
+	     this, desc->func);
+	}
+
+	
 
     ActionContainer *advancedMenu =
         ActionManager::actionContainer(Core::Constants::M_EDIT_ADVANCED);
@@ -1490,21 +1525,41 @@ void FakeVimPluginPrivate::windowCommand(FakeVimHandler *handler, const QString 
     else if (key == "W" || key == "<C-W>")
         triggerAction(Core::Constants::GOTO_NEXT_SPLIT);
     else if (key.contains("RIGHT") || key == "L" || key == "<S-L>")
-        moveSomewhere(handler, &moveRightWeight, key == "<S-L>" ? -1 : count);
+        moveSomewhere(handler->widget(), &moveRightWeight, key == "<S-L>" ? -1 : count);
     else if (key.contains("LEFT")  || key == "H" || key == "<S-H>")
-        moveSomewhere(handler, &moveLeftWeight, key == "<S-H>" ? -1 : count);
+        moveSomewhere(handler->widget(), &moveLeftWeight, key == "<S-H>" ? -1 : count);
     else if (key.contains("UP")    || key == "K" || key == "<S-K>")
-        moveSomewhere(handler, &moveUpWeight, key == "<S-K>" ? -1 : count);
+        moveSomewhere(handler->widget(), &moveUpWeight, key == "<S-K>" ? -1 : count);
     else if (key.contains("DOWN")  || key == "J" || key == "<S-J>")
-        moveSomewhere(handler, &moveDownWeight, key == "<S-J>" ? -1 : count);
+        moveSomewhere(handler->widget(), &moveDownWeight, key == "<S-J>" ? -1 : count);
     else
         qDebug() << "UNKNOWN WINDOW COMMAND: <C-W>" << map;
 }
 
-void FakeVimPluginPrivate::moveSomewhere(FakeVimHandler *handler, DistFunction f, int count)
+void FakeVimPluginPrivate::windowSelectUp(bool){
+		moveSomewhere(EditorManager::currentEditor()->widget(), &moveUpWeight, 1);
+}
+void FakeVimPluginPrivate::windowSelectDown(bool){
+	moveSomewhere(EditorManager::currentEditor()->widget(), &moveDownWeight, 1);
+}
+void FakeVimPluginPrivate::windowSelectRight(bool){
+	moveSomewhere(EditorManager::currentEditor()->widget(), &moveRightWeight, 1);
+}
+void FakeVimPluginPrivate::windowSelectLeft(bool){
+	moveSomewhere(EditorManager::currentEditor()->widget(), &moveLeftWeight, 1);
+}
+void FakeVimPluginPrivate::windowSplitSmart(bool){
+	auto ce=EditorManager::currentEditor();
+	if (!ce) return;
+	auto w=ce->widget();
+	
+	triggerAction((w->width() > w->height())?Core::Constants::SPLIT_SIDE_BY_SIDE:Core::Constants::SPLIT);
+}
+
+void FakeVimPluginPrivate::moveSomewhere(QWidget* w/*FakeVimHandler *handler*/, DistFunction f, int count)
 {
-    QTC_ASSERT(handler, return);
-    QWidget *w = handler->widget();
+    QTC_ASSERT(w, return);
+//    QWidget *w = handler->widget();
     QPlainTextEdit *pe = qobject_cast<QPlainTextEdit *>(w);
     QTC_ASSERT(pe, return);
     QRect rc = pe->cursorRect();
