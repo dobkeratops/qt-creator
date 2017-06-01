@@ -82,6 +82,8 @@ public:
     void setCloseSplitEnabled(bool enable);
     void setCloseSplitIcon(const QIcon &icon);
 
+	void changeTab(int tab);
+	
 signals:
     void closeClicked();
     void goBackClicked();

@@ -63,10 +63,11 @@ struct EditorToolBarPrivate
 {
     explicit EditorToolBarPrivate(QWidget *parent, EditorToolBar *q);
 
-    QComboBox *m_editorList;
+    QComboBox *m_editorListMaybe;
+	QTabBar*	m_tabBar;
     QToolButton *m_closeEditorButton;
     QToolButton *m_lockButton;
-    QToolButton *m_dragHandle;
+    QToolButton *m_dragHandleMaybe;
     QMenu *m_dragHandleMenu;
     EditorToolBar::MenuProvider m_menuProvider;
     QAction *m_goBackAction;
@@ -86,13 +87,18 @@ struct EditorToolBarPrivate
     QPoint m_dragStartPosition;
 
     bool m_isStandalone;
+	
 };
 
+bool EditorUseTabBar(){return true;}
+bool EditorClassicControls(){return !EditorUseTabBar();}
+
+
 EditorToolBarPrivate::EditorToolBarPrivate(QWidget *parent, EditorToolBar *q) :
-    m_editorList(new QComboBox(q)),
+    m_editorListMaybe(EditorClassicControls()?new QComboBox(q):nullptr),
     m_closeEditorButton(new QToolButton(q)),
     m_lockButton(new QToolButton(q)),
-    m_dragHandle(new QToolButton(q)),
+    m_dragHandleMaybe(EditorClassicControls()?new QToolButton(q):nullptr),
     m_dragHandleMenu(0),
     m_goBackAction(new QAction(Utils::Icons::PREV_TOOLBAR.icon(), EditorManager::tr("Go Back"), parent)),
     m_goForwardAction(new QAction(Utils::Icons::NEXT_TOOLBAR.icon(), EditorManager::tr("Go Forward"), parent)),
@@ -110,11 +116,31 @@ EditorToolBarPrivate::EditorToolBarPrivate(QWidget *parent, EditorToolBar *q) :
     m_defaultToolBar(new QWidget(q)),
     m_isStandalone(false)
 {
+	if (EditorUseTabBar){
+		auto tb= m_tabBar=new QTabBar(m_defaultToolBar);
+		tb->setDocumentMode(true);
+		tb->setMovable(true);
+		tb->setShape(QTabBar::RoundedNorth);
+		tb->setDrawBase(false);	
+		tb->setUsesScrollButtons(true);
+		tb->setTabsClosable(true);
+	}
+	
+
 }
 
 /*!
   Mimic the look of the text editor toolbar as defined in e.g. EditorView::EditorView
   */
+
+template<typename T,typename Y>
+void addWidgetMaybe(T* dst,Y* src){
+	if (src && dst) dst->addWidget(src);
+}
+template<typename T,typename Y>
+void addWidgetMaybe(T* dst,Y* src,int i){
+	if (src && dst) dst->addWidget(src,i);
+}
 EditorToolBar::EditorToolBar(QWidget *parent) :
         Utils::StyledBar(parent), d(new EditorToolBarPrivate(parent, this))
 {
@@ -122,8 +148,9 @@ EditorToolBar::EditorToolBar(QWidget *parent) :
     toolBarLayout->setMargin(0);
     toolBarLayout->setSpacing(0);
     toolBarLayout->addWidget(d->m_defaultToolBar);
-    d->m_toolBarPlaceholder->setLayout(toolBarLayout);
-    d->m_toolBarPlaceholder->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::MinimumExpanding);
+	d->m_toolBarPlaceholder->setLayout(toolBarLayout);
+	d->m_toolBarPlaceholder->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::MinimumExpanding);
+	
 
     d->m_defaultToolBar->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::MinimumExpanding);
     d->m_activeToolBar = d->m_defaultToolBar;
@@ -131,30 +158,35 @@ EditorToolBar::EditorToolBar(QWidget *parent) :
     d->m_lockButton->setAutoRaise(true);
     d->m_lockButton->setEnabled(false);
 
-    d->m_dragHandle->setProperty("noArrow", true);
-    d->m_dragHandle->setToolTip(tr("Drag to drag documents between splits"));
-    d->m_dragHandle->installEventFilter(this);
-    d->m_dragHandleMenu = new QMenu(d->m_dragHandle);
-    d->m_dragHandle->setMenu(d->m_dragHandleMenu);
-
+	if (auto dh=d->m_dragHandleMaybe){
+	    dh->setProperty("noArrow", true);
+	    dh->setToolTip(tr("Drag to drag documents between splits"));
+	    dh->installEventFilter(this);
+	    d->m_dragHandleMenu = new QMenu(dh);
+        dh->setMenu(d->m_dragHandleMenu);
+	}
     connect(d->m_goBackAction, &QAction::triggered, this, &EditorToolBar::goBackClicked);
     connect(d->m_goForwardAction, &QAction::triggered, this, &EditorToolBar::goForwardClicked);
+	if (d->m_tabBar)
+		connect(d->m_tabBar,&QTabBar::currentChanged, this,&EditorToolBar::changeTab);
 
-    d->m_editorList->setProperty("hideicon", true);
-    d->m_editorList->setProperty("notelideasterisk", true);
-    d->m_editorList->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-    d->m_editorList->setMinimumContentsLength(20);
-    d->m_editorList->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-    d->m_editorList->setModel(DocumentModel::model());
-    d->m_editorList->setMaxVisibleItems(40);
-    d->m_editorList->setContextMenuPolicy(Qt::CustomContextMenu);
-
-    d->m_closeEditorButton->setAutoRaise(true);
-    d->m_closeEditorButton->setIcon(Utils::Icons::CLOSE_TOOLBAR.icon());
-    d->m_closeEditorButton->setEnabled(false);
-    d->m_closeEditorButton->setProperty("showborder", true);
-
-    d->m_toolBarPlaceholder->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::MinimumExpanding);
+	if (auto el=d->m_editorListMaybe){
+	    el->setProperty("hideicon", true);
+		el->setProperty("notelideasterisk", true);
+		el->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+		el->setMinimumContentsLength(20);
+		el->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+		el->setModel(DocumentModel::model());
+	    el->setMaxVisibleItems(40);
+		el->setContextMenuPolicy(Qt::CustomContextMenu);
+	}
+	if (d->m_closeEditorButton){
+		d->m_closeEditorButton->setAutoRaise(true);
+		d->m_closeEditorButton->setIcon(Utils::Icons::CLOSE_TOOLBAR.icon());
+		d->m_closeEditorButton->setEnabled(false);
+		d->m_closeEditorButton->setProperty("showborder", true);
+	}
+	d->m_toolBarPlaceholder->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::MinimumExpanding);
 
     d->m_backButton->setDefaultAction(d->m_goBackAction);
 
@@ -176,28 +208,31 @@ EditorToolBar::EditorToolBar(QWidget *parent) :
     QHBoxLayout *toplayout = new QHBoxLayout(this);
     toplayout->setSpacing(0);
     toplayout->setMargin(0);
-    toplayout->addWidget(d->m_backButton);
-    toplayout->addWidget(d->m_forwardButton);
-    toplayout->addWidget(d->m_lockButton);
-    toplayout->addWidget(d->m_dragHandle);
-    toplayout->addWidget(d->m_editorList);
-    toplayout->addWidget(d->m_closeEditorButton);
-    toplayout->addWidget(d->m_toolBarPlaceholder, 1); // Custom toolbar stretches
-    toplayout->addWidget(d->m_splitButton);
-    toplayout->addWidget(d->m_closeSplitButton);
+    addWidgetMaybe(toplayout,d->m_backButton);
+    addWidgetMaybe(toplayout,d->m_forwardButton);
+	addWidgetMaybe(toplayout,d->m_tabBar);
+    addWidgetMaybe(toplayout,d->m_lockButton);
+    addWidgetMaybe(toplayout,d->m_dragHandleMaybe);
+    addWidgetMaybe(toplayout,d->m_editorListMaybe);
+    addWidgetMaybe(toplayout,d->m_closeEditorButton);
+    addWidgetMaybe(toplayout,d->m_toolBarPlaceholder, 1); // Custom toolbar stretches
+    addWidgetMaybe(toplayout,d->m_splitButton);
+    addWidgetMaybe(toplayout,d->m_closeSplitButton);
 
     setLayout(toplayout);
 
     // this signal is disconnected for standalone toolbars and replaced with
     // a private slot connection
-    connect(d->m_editorList, static_cast<void (QComboBox::*)(int)>(&QComboBox::activated),
+	if (auto el=d->m_editorListMaybe){
+	    connect(el, static_cast<void (QComboBox::*)(int)>(&QComboBox::activated),
             this, &EditorToolBar::listSelectionActivated);
 
-    connect(d->m_editorList, &QComboBox::customContextMenuRequested, [this](QPoint p) {
+		connect(el, &QComboBox::customContextMenuRequested, [this](QPoint p) {
        QMenu menu;
        fillListContextMenu(&menu);
-       menu.exec(d->m_editorList->mapToGlobal(p));
+       menu.exec(d->m_editorListMaybe->mapToGlobal(p));
     });
+	};
     connect(d->m_dragHandleMenu, &QMenu::aboutToShow, [this]() {
        d->m_dragHandleMenu->clear();
        fillListContextMenu(d->m_dragHandleMenu);
@@ -241,7 +276,8 @@ void EditorToolBar::removeToolbarForEditor(IEditor *editor)
             d->m_activeToolBar = d->m_defaultToolBar;
             d->m_activeToolBar->setVisible(true);
         }
-        d->m_toolBarPlaceholder->layout()->removeWidget(toolBar);
+	    d->m_toolBarPlaceholder->layout()->removeWidget(toolBar);
+		
         toolBar->setVisible(false);
         toolBar->setParent(0);
     }
@@ -272,6 +308,9 @@ void EditorToolBar::addEditor(IEditor *editor)
 
     if (toolBar && !d->m_isStandalone)
         addCenterToolBar(toolBar);
+	if (d->m_tabBar){
+		d->m_tabBar->addTab(editor->document()->displayName());
+	}
 
     updateDocumentStatus(editor->document());
 }
@@ -280,7 +319,7 @@ void EditorToolBar::addCenterToolBar(QWidget *toolBar)
 {
     QTC_ASSERT(toolBar, return);
     toolBar->setVisible(false); // will be made visible in setCurrentEditor
-    d->m_toolBarPlaceholder->layout()->addWidget(toolBar);
+	d->m_toolBarPlaceholder->layout()->addWidget(toolBar);
 
     updateToolBar(toolBar);
 }
@@ -303,10 +342,12 @@ void EditorToolBar::setToolbarCreationFlags(ToolbarCreationFlags flags)
         connect(EditorManager::instance(), &EditorManager::currentEditorChanged,
                 this, &EditorToolBar::updateEditorListSelection);
 
-        disconnect(d->m_editorList, static_cast<void (QComboBox::*)(int)>(&QComboBox::activated),
+		if (d->m_editorListMaybe){
+	        disconnect(d->m_editorListMaybe, static_cast<void (QComboBox::*)(int)>(&QComboBox::activated),
                    this, &EditorToolBar::listSelectionActivated);
-        connect(d->m_editorList, static_cast<void (QComboBox::*)(int)>(&QComboBox::activated),
+		    connect(d->m_editorListMaybe, static_cast<void (QComboBox::*)(int)>(&QComboBox::activated),
                 this, &EditorToolBar::changeActiveEditor);
+		}
         d->m_splitButton->setVisible(false);
         d->m_closeSplitButton->setVisible(false);
     }
@@ -320,8 +361,13 @@ void EditorToolBar::setMenuProvider(const EditorToolBar::MenuProvider &provider)
 void EditorToolBar::setCurrentEditor(IEditor *editor)
 {
     IDocument *document = editor ? editor->document() : 0;
-    d->m_editorList->setCurrentIndex(DocumentModel::rowOfDocument(document));
-
+	if (auto el=d->m_editorListMaybe){
+	    el->setCurrentIndex(DocumentModel::rowOfDocument(document));
+	}
+	if (d->m_tabBar){
+		qDebug()<<"TODO tab bar setCurentEditor goes here\n";
+	//	d->m_tabBar->insertTab(editor->document()->filename());
+	}
     // If we never added the toolbar from the editor,  we will never change
     // the editor, so there's no need to update the toolbar either.
     if (!d->m_isStandalone)
@@ -332,12 +378,40 @@ void EditorToolBar::setCurrentEditor(IEditor *editor)
 
 void EditorToolBar::updateEditorListSelection(IEditor *newSelection)
 {
-    if (newSelection)
-        d->m_editorList->setCurrentIndex(DocumentModel::rowOfDocument(newSelection->document()));
+    if (newSelection){
+		if (d->m_editorListMaybe)
+	        d->m_editorListMaybe->setCurrentIndex(DocumentModel::rowOfDocument(newSelection->document()));
+		qDebug()<<"TODO tabBar stuff";
+	}
+}
+
+void EditorToolBar::changeTab(int index){
+	qDebug()<<"tabBar: change tab to "<<index;
+//	for (int i=0;i<DocumentModel::entryCount(); i++) {
+//		if (DocumentModel::entryAtRow(i)->displayName()==d->m_tabBar->tabText(index)){
+//		    EditorManager::activateEditorForEntry(DocumentModel::entryAtRow(i));	
+//		}
+//	}
+	auto ls=DocumentModel::entries();
+	for (int i=0; i<ls.count(); i++) {
+		auto e=ls[i];
+		if (e->displayName()==d->m_tabBar->tabText(index)){
+		    EditorManager::activateEditorForEntry(e);			
+		}
+	}
 }
 
 void EditorToolBar::changeActiveEditor(int row)
 {
+	qDebug()<<"TODO tabBar stuff";
+	auto ed=DocumentModel::entryAtRow(row);
+	if (ed && d->m_tabBar){
+		for (int i=0; i<d->m_tabBar->count();i++){
+			if (d->m_tabBar->tabText(i)==ed->displayName()){
+				d->m_tabBar->setCurrentIndex(i);
+			}
+		}
+	}
     EditorManager::activateEditorForEntry(DocumentModel::entryAtRow(row));
 }
 
@@ -383,27 +457,35 @@ void EditorToolBar::checkDocumentStatus()
 {
     IDocument *document = qobject_cast<IDocument *>(sender());
     QTC_ASSERT(document, return);
+	if (d->m_editorListMaybe){
     DocumentModel::Entry *entry = DocumentModel::entryAtRow(
-                d->m_editorList->currentIndex());
-
+                d->m_editorListMaybe->currentIndex());
+	
     if (entry && entry->document && entry->document == document)
         updateDocumentStatus(document);
+	}
+	qDebug()<<"TODO tabbar";
 }
 
 void EditorToolBar::updateDocumentStatus(IDocument *document)
 {
     d->m_closeEditorButton->setEnabled(document != 0);
+	qDebug()<<"TODO:updateDocumentStatus for tabBar";
 
     if (!document) {
         d->m_lockButton->setIcon(QIcon());
         d->m_lockButton->setEnabled(false);
         d->m_lockButton->setToolTip(QString());
-        d->m_dragHandle->setIcon(QIcon());
-        d->m_editorList->setToolTip(QString());
+        if (d->m_dragHandleMaybe){d->m_dragHandleMaybe->setIcon(QIcon());}
+		if (d->m_editorListMaybe){
+	        d->m_editorListMaybe->setToolTip(QString());
+		}
         return;
     }
 
-    d->m_editorList->setCurrentIndex(DocumentModel::rowOfDocument(document));
+	if (d->m_editorListMaybe){
+	    d->m_editorListMaybe->setCurrentIndex(DocumentModel::rowOfDocument(document));
+	}
 
     if (document->filePath().isEmpty()) {
         d->m_lockButton->setIcon(QIcon());
@@ -421,26 +503,30 @@ void EditorToolBar::updateDocumentStatus(IDocument *document)
         d->m_lockButton->setToolTip(tr("File is writable"));
     }
 
-    if (document->filePath().isEmpty())
-        d->m_dragHandle->setIcon(QIcon());
-    else
-        d->m_dragHandle->setIcon(FileIconProvider::icon(document->filePath().toFileInfo()));
+	if (d->m_dragHandleMaybe){
+		if (document->filePath().isEmpty())
+			d->m_dragHandleMaybe->setIcon(QIcon());
+		else
+		    d->m_dragHandleMaybe->setIcon(FileIconProvider::icon(document->filePath().toFileInfo()));
+	}
 
-    d->m_editorList->setToolTip(document->filePath().isEmpty()
+	if (d->m_editorListMaybe){
+	    d->m_editorListMaybe->setToolTip(document->filePath().isEmpty()
                                 ? document->displayName()
                                 : document->filePath().toUserOutput());
+	}
 }
 
 bool EditorToolBar::eventFilter(QObject *obj, QEvent *event)
 {
-    if (obj == d->m_dragHandle) {
+    if (obj == d->m_dragHandleMaybe && d->m_dragHandleMaybe) {
         if (event->type() == QEvent::MouseButtonPress) {
             auto me = static_cast<QMouseEvent *>(event);
             if (me->buttons() == Qt::LeftButton)
                 d->m_dragStartPosition = me->pos();
             return true; // do not pop up menu already on press
         } else if (event->type() == QEvent::MouseButtonRelease) {
-            d->m_dragHandle->showMenu();
+            d->m_dragHandleMaybe->showMenu();
             return true;
         } else if (event->type() == QEvent::MouseMove) {
             auto me = static_cast<QMouseEvent *>(event);
@@ -450,7 +536,7 @@ bool EditorToolBar::eventFilter(QObject *obj, QEvent *event)
                     < QApplication::startDragDistance())
                 return Utils::StyledBar::eventFilter(obj, event);
             DocumentModel::Entry *entry = DocumentModel::entryAtRow(
-                        d->m_editorList->currentIndex());
+                        d->m_editorListMaybe->currentIndex());
             if (!entry) // no document
                 return Utils::StyledBar::eventFilter(obj, event);
             auto drag = new QDrag(this);
